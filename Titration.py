@@ -76,8 +76,13 @@ def plot_cytotox(df, color_dict, marker_dict, label_dict):
 	mean_df = df.groupby('ug/mL').mean().reset_index()
 	sem_df = df.groupby('ug/mL').sem().reset_index()
 
-	def PL3_func(x, a, b, c, d):
-		return d/(1.0 +(x/c)**(-b))
+	def PL3_func(x, a, b, c):
+		return c/(1.0 +(x/b)**(-a))
+	
+	# Residuals of actual and fit values
+	def residuals(parameters, func, y, x):
+		err = y - func(x, *parameters)
+		return err
 	
 	def sum_of_squares(ls):
 		s = 0
@@ -127,21 +132,37 @@ def plot_cytotox(df, color_dict, marker_dict, label_dict):
 				mfc = mfc, mec = mec, mew = mew,
 				ecolor = color, fmt = marker, label = label)
 			
-			# Get generate fit to means
-			try:
-				PL3_popt, PL3_pcov = curve_fit(PL3_func, mean_df['ug/mL'][1:], mean_df[column][1:],
-					bounds = (0.02, np.inf))
-			except RuntimeError:
-				PL3_popt, PL3_pcov = curve_fit(PL3_func, mean_df['ug/mL'][1:], mean_df[column][1:])
-			PL3_residuals = mean_df[column][1:] - PL3_func(mean_df['ug/mL'][1:], *PL3_popt)
-			PL3_ssr = sum_of_squares(PL3_residuals)
-			func_to_use = PL3_func
-			popt_to_use = PL3_popt
 			
-			# Plot curve fit
-			ax.plot(plot_range, func_to_use(plot_range, *popt_to_use), 
-				color = color, linewidth = 3)
-				
+			# Get x and y range
+			curr_xrange = mean_df['ug/mL'].tolist()
+			curr_yrange = mean_df[column].tolist()
+			min0 = 0.02
+			max0 = max(curr_yrange)
+			
+			# Generate fit to means
+			ssr = np.inf
+			popt = [np.nan, np.nan, np.nan]
+			while len(curr_xrange) > 5 and np.isinf(ssr):
+				try:
+					# Initial guess of parameters
+					p0 = [0.1, 0.02, max0]
+					# Fit to data with 3PL function
+					popt, pcov = leastsq(residuals, p0, args = (PL3_func, curr_yrange, curr_xrange))
+					ssr = sum_of_squares(residuals(popt, PL3_func, curr_yrange, curr_xrange))
+				except RuntimeError:
+					curr_xrange = curr_xrange[:-1]
+					curr_yrange = curr_yrange[:-1]
+			
+			if not np.isinf(ssr):
+				PL3_residuals = mean_df[column][:] - PL3_func(mean_df['ug/mL'][:], *popt)
+				PL3_ssr = sum_of_squares(PL3_residuals)
+				func_to_use = PL3_func
+				popt_to_use = popt
+			
+				# Plot curve fit
+				ax.plot(plot_range, func_to_use(plot_range, *popt_to_use), 
+					color = color, linewidth = 3)
+			
 	# Hide the right and top spines
 	ax.spines['right'].set_visible(False)
 	ax.spines['top'].set_visible(False)
@@ -165,7 +186,8 @@ def plot_cytotox(df, color_dict, marker_dict, label_dict):
 		labelspacing = 1.3, handletextpad = 0.25, borderaxespad=0.,
 		columnspacing = 0.5, frameon = False)
 	plt.tight_layout(pad = 0.5)
-	plt.savefig('mIgG_cytotox.pdf')
+	#plt.savefig('mIgG_cytotox.pdf')
+	plt.show()
 
 ##########################################################################################
 # Plot on cell titrations
